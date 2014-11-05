@@ -1,0 +1,10 @@
+#framework
+django
+
+#libs
+python-oauth2
+google-api-python-client
+
+#debug
+ipython
+ipdb
