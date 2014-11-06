@@ -11,29 +11,23 @@ from django.contrib.auth.decorators import login_required
 from oauth2client.client import OAuth2WebServerFlow, flow_from_clientsecrets
 from oauth2client.django_orm import Storage
 from oauth2client import xsrfutil
+from django.core.urlresolvers import reverse
 
 import apiclient.discovery
 
 from models import CredentialsModel
 
-#TODO
-client_secrets = {
-    'oauth2_client_id': settings.OAUTH2_CLIENT_ID,
-    'oauth2_client_secret': settings.OAUTH2_CLIENT_SECRET,
-    'google_auth_scope': settings.GOOGLE_AUTH_SCOPE,
-    'oauth2_redirect_uri': settings.OAUTH2_REDIRECT_URI
-}
 
 FLOW = OAuth2WebServerFlow(
-    client_secrets.get('oauth2_client_id', settings.OAUTH2_CLIENT_ID),
-    client_secrets.get('oauth2_client_secret', settings.OAUTH2_CLIENT_SECRET),
-    client_secrets.get('google_auth_scope', settings.GOOGLE_AUTH_SCOPE),
-    client_secrets.get('oauth2_redirect_uri', settings.OAUTH2_REDIRECT_URI)
+    settings.OAUTH2_CLIENT_ID,
+    settings.OAUTH2_CLIENT_SECRET,
+    settings.GOOGLE_AUTH_SCOPE,
+    settings.OAUTH2_HOST + '/' + settings.OAUTH2_CALLBACK
 )
 
 
-@login_required(login_url='/login/')
-def begin(request):
+@login_required(login_url='login')
+def oauth2_begin(request):
     storage = Storage(CredentialsModel, 'id', request.user, 'credential')
     credential = storage.get()
     if credential is None or credential.invalid is True:
@@ -41,22 +35,32 @@ def begin(request):
         authorize_url = FLOW.step1_get_authorize_url()
         return HttpResponseRedirect(authorize_url)
     else:
-        http = httplib2.Http()
-        http = credential.authorize(http)
-        drive_service = apiclient.discovery.build("drive", "v2", http=http)
-        new_file = create_file(drive_service)
-        return render_to_response('result.html', {'new_file': new_file}, RequestContext(request))
+        return HttpResponseRedirect(reverse('oauth2_complete'))
 
 
-@login_required(login_url='/login/')
-def complete(request):
+@login_required(login_url='login')
+def oauth2_callback(request):
     if not xsrfutil.validate_token(settings.SECRET_KEY, request.REQUEST['state'], request.user):
         return HttpResponseBadRequest()
     credential = FLOW.step2_exchange(request.REQUEST)
     storage = Storage(CredentialsModel, 'id', request.user, 'credential')
     storage.put(credential)
     #TODO here the redirect
-    return HttpResponseRedirect("/")
+    return HttpResponseRedirect(reverse('oauth2_complete'))
+
+
+@login_required(login_url='login')
+def oauth2_complete(request):
+    storage = Storage(CredentialsModel, 'id', request.user, 'credential')
+    credential = storage.get()
+    if credential is None or credential.invalid is True:
+        return HttpResponseRedirect(reverse('oauth2_begin'))
+    else:
+        http = httplib2.Http()
+        http = credential.authorize(http)
+        drive_service = apiclient.discovery.build("drive", "v2", http=http)
+        new_file = create_file(drive_service)
+        return render_to_response('result.html', {'new_file': new_file}, RequestContext(request))
 
 
 def index(request):
