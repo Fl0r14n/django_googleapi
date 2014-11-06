@@ -3,26 +3,25 @@ import io
 import httplib2
 from django.shortcuts import render_to_response
 from django.template import RequestContext
-
 from django.conf import settings
 from django.http import HttpResponseRedirect
 from django.http import HttpResponseBadRequest
 from django.contrib.auth.decorators import login_required
-from oauth2client.client import OAuth2WebServerFlow, flow_from_clientsecrets
+from oauth2client.client import OAuth2WebServerFlow
 from oauth2client.django_orm import Storage
 from oauth2client import xsrfutil
 from django.core.urlresolvers import reverse
 
 import apiclient.discovery
-
 from models import CredentialsModel
 
 
 FLOW = OAuth2WebServerFlow(
-    settings.OAUTH2_CLIENT_ID,
-    settings.OAUTH2_CLIENT_SECRET,
-    settings.GOOGLE_AUTH_SCOPE,
+    settings.OAUTH2_CLIENT_ID if hasattr(settings, 'OAUTH2_CLIENT_ID') else '',
+    settings.OAUTH2_CLIENT_SECRET if hasattr(settings, 'OAUTH2_CLIENT_SECRET') else '',
+    settings.GOOGLE_AUTH_SCOPE if hasattr(settings, 'GOOGLE_AUTH_SCOPE') else '',
     settings.OAUTH2_HOST + '/' + settings.OAUTH2_CALLBACK
+    if hasattr(settings, 'OAUTH2_HOST') and hasattr(settings, 'OAUTH2_CALLBACK') else None
 )
 
 
@@ -45,7 +44,7 @@ def oauth2_callback(request):
     credential = FLOW.step2_exchange(request.REQUEST)
     storage = Storage(CredentialsModel, 'id', request.user, 'credential')
     storage.put(credential)
-    #TODO here the redirect
+    # TODO here the redirect
     return HttpResponseRedirect(reverse('oauth2_complete'))
 
 
@@ -68,7 +67,7 @@ def index(request):
 
 
 def create_file(drive_service):
-#MIME_TYPE = 'application/vnd.google-apps.spreadsheet'
+    # MIME_TYPE = 'application/vnd.google-apps.spreadsheet'
     mime_type = 'text/csv'
     title = 'Name of Spreadsheet'
     description = 'some description'
@@ -84,6 +83,7 @@ def create_file(drive_service):
 
     new_file = drive_service.files().insert(body=body, media_body=media_body).execute()
     return new_file
+
 
 sample_csv = u''.join([
     'Year,Make,Model,Description,Price',
