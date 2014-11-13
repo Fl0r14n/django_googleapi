@@ -44,6 +44,9 @@ class GApi(object):
                 authorize_url = self.flow.step1_get_authorize_url()
                 return HttpResponseRedirect(authorize_url)
             else:
+                # refresh credential if needed
+                if credential.access_token_expired:
+                    credential.refresh(httplib2.Http())
                 if 'oauth2_state' in kwargs:
                     del kwargs['oauth2_state']
                 return view_function(request, *args, **kwargs)
