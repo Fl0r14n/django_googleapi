@@ -3,6 +3,7 @@ import json
 import base64
 
 from oauth2client.client import OAuth2WebServerFlow
+from oauth2client.client import AccessTokenRefreshError
 from oauth2client.django_orm import Storage
 from oauth2client import xsrfutil
 from django.http import HttpResponseRedirect
@@ -16,7 +17,12 @@ from models import CredentialsModel
 
 class GApi(object):
     def __init__(self, client_id='', client_secret='', scope='', redirect_uri=None):
-        self.flow = OAuth2WebServerFlow(client_id, client_secret, scope, redirect_uri=redirect_uri)
+        self.flow = OAuth2WebServerFlow(client_id,
+                                        client_secret,
+                                        scope,
+                                        redirect_uri=redirect_uri,
+                                        access_type='offline',
+                                        approval_prompt='force')
 
     def oauth2_required(self, view_function):
         """
@@ -24,29 +30,37 @@ class GApi(object):
         :param view_function:
         :return:
         """
+
         @wraps(view_function)
         def wrapper(request, *args, **kwargs):
-            storage = Storage(CredentialsModel, 'id', request.user, 'credential')
-            credential = storage.get()
-            if credential is None or credential.invalid is True:
-                # no credential so we do oauth2 web auth
+
+            def oauth2_step1():
                 state = {
-                    #token to check on redirect
+                    # token to check on redirect
                     'token': xsrfutil.generate_token(settings.SECRET_KEY, request.user)
                 }
-                #extra params that need to be kept over the auth process
+                # extra params that need to be kept over the auth process
                 if 'oauth2_state' in kwargs:
                     state['oauth2_state'] = kwargs['oauth2_state']
-                #encode the whole stuff
-                base64_state = base64.urlsafe_b64encode(json.dumps(state))
-                #set the oauth2 state param
+                # encode the whole stuff
+                base64_state = base64.urlsafe_b64encode(str(json.dumps(state)))
+                # set the oauth2 state param
                 self.flow.params['state'] = base64_state
                 authorize_url = self.flow.step1_get_authorize_url()
                 return HttpResponseRedirect(authorize_url)
+
+            storage = Storage(CredentialsModel, 'id', request.user, 'credential')
+            credential = storage.get()
+            if credential is None or credential.invalid is True:
+                return oauth2_step1()
             else:
                 # refresh credential if needed
                 if credential.access_token_expired:
-                    credential.refresh(httplib2.Http())
+                    try:
+                        credential.refresh(httplib2.Http())
+                    except AccessTokenRefreshError:
+                        return oauth2_step1()
+                # remove existing oauth2_state params
                 if 'oauth2_state' in kwargs:
                     del kwargs['oauth2_state']
                 return view_function(request, *args, **kwargs)
@@ -59,14 +73,16 @@ class GApi(object):
         :param view_function:
         :return:
         """
+
         @wraps(view_function)
         def wrapper(request, *args, **kwargs):
             # decode the oauth2 state param
             state = json.loads(base64.urlsafe_b64decode(str(request.REQUEST['state'])))
-            #validate token
-            if not 'token' in state or not xsrfutil.validate_token(settings.SECRET_KEY, state['token'], request.user):
+            # validate token
+            if not 'token' in state or not xsrfutil.validate_token(settings.SECRET_KEY, str(state['token']),
+                                                                   request.user):
                 return HttpResponseBadRequest()
-            #save oauth2 credential in db
+            # save oauth2 credential in db
             credential = self.flow.step2_exchange(request.REQUEST)
             storage = Storage(CredentialsModel, 'id', request.user, 'credential')
             storage.put(credential)
