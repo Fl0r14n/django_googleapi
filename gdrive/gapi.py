@@ -1,6 +1,7 @@
 from functools import wraps
 import json
 import base64
+from urllib import unquote_plus
 
 from oauth2client.client import OAuth2WebServerFlow
 from oauth2client.client import AccessTokenRefreshError
@@ -77,7 +78,11 @@ class GApi(object):
         @wraps(view_function)
         def wrapper(request, *args, **kwargs):
             # decode the oauth2 state param
-            state = json.loads(base64.urlsafe_b64decode(str(request.REQUEST['state'])))
+            state_str = str(request.REQUEST['state'])
+            # fix here state might be urlencoded twice along the way and sucks if that happens
+            while '%' in state_str:
+                state_str = unquote_plus(state_str)
+            state = json.loads(base64.urlsafe_b64decode(state_str))
             # validate token
             if not 'token' in state or not xsrfutil.validate_token(settings.SECRET_KEY, str(state['token']),
                                                                    request.user):
@@ -86,7 +91,7 @@ class GApi(object):
             credential = self.flow.step2_exchange(request.REQUEST)
             storage = Storage(CredentialsModel, 'id', request.user, 'credential')
             storage.put(credential)
-            #put oauth2_state params in kwargs
+            # put oauth2_state params in kwargs
             if 'oauth2_state' in state:
                 kwargs['oauth2_state'] = state['oauth2_state']
             return view_function(request, *args, **kwargs)
